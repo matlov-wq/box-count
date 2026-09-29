@@ -95,7 +95,7 @@ td.boxes{font-size:.8rem;color:var(--muted)}
 .empty strong{display:block;color:var(--ink);font-size:1rem;margin-bottom:4px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px}
 .confirm{margin:0 14px 14px;padding:12px;border:1px solid var(--danger);border-radius:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:20}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:20;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis}
 .note{font-size:.78rem;color:var(--muted)}
 @media (max-width:760px){
   .grid{grid-template-columns:minmax(0,1fr)}
@@ -117,6 +117,16 @@ td.boxes{font-size:.8rem;color:var(--muted)}
 .camhit{font-family:var(--f-mono);font-weight:600;color:var(--ok)}
 #who{width:100%;font-family:var(--f-body);font-size:1rem;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 @media (max-width:760px){.scan{position:static}}
+#box{font-weight:600;font-size:1.15rem}
+.viewtoggle{display:flex;gap:4px;padding:10px 14px 0}
+.viewtoggle button{font:600 .85rem var(--f-body);padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);cursor:pointer}
+.viewtoggle button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.boxgroup{border-bottom:1px solid var(--line)}
+.boxgroup h3{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0;padding:10px 14px 4px;font:700 1.15rem var(--f-display)}
+.boxgroup h3 .meta{font-family:var(--f-body)}
+.boxgroup table td{padding-block:5px}
+.settings{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;color:var(--muted)}
+#prefix{width:6.5rem;font-family:var(--f-mono);font-size:1rem;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);text-transform:uppercase}
 </style>
 </head>
 <body>
@@ -155,8 +165,8 @@ td.boxes{font-size:.8rem;color:var(--muted)}
         <input id="who" type="text" autocomplete="off" spellcheck="false" placeholder="Your name">
       </div>
       <div class="boxfield">
-        <label class="lbl" for="box">Box (optional, stays set)</label>
-        <input id="box" type="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="e.g. B-14">
+        <label class="lbl" for="box">Current box — scan its label</label>
+        <input id="box" type="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="e.g. CH-12">
       </div>
       <div class="last" id="lastLine">Qty resets to 1 after each entry.</div>
       <button type="button" class="btn" id="undoBtn">Undo last</button>
@@ -176,13 +186,15 @@ td.boxes{font-size:.8rem;color:var(--muted)}
     </section>
 
     <section class="card" id="totalsCard">
-      <div class="card-head"><h2>Totals by SKU</h2><span class="meta" id="genTime"></span></div>
+      <div class="card-head"><h2 id="totTitle">Totals by SKU</h2><span class="meta" id="genTime"></span></div>
+      <div class="viewtoggle"><button type="button" id="vSku" aria-pressed="true">By SKU</button><button type="button" id="vBox" aria-pressed="false">By box</button></div>
       <div class="stats">
         <div class="stat"><div class="n" id="stUnits">0</div><div class="l">Units</div></div>
         <div class="stat"><div class="n" id="stSkus">0</div><div class="l">Unique SKUs</div></div>
         <div class="stat"><div class="n" id="stBoxes">0</div><div class="l">Boxes</div></div>
       </div>
-      <div class="tablewrap">
+      <div id="byBox" hidden></div>
+      <div class="tablewrap" id="bySku">
         <table>
           <thead><tr><th>SKU</th><th class="r">Count</th><th>Boxes</th></tr></thead>
           <tbody id="totals"></tbody>
@@ -202,6 +214,7 @@ td.boxes{font-size:.8rem;color:var(--muted)}
       <textarea id="copyFallback" hidden readonly style="width:calc(100% - 28px);margin:0 14px 14px;height:140px;font-family:var(--f-mono)"></textarea>
     </section>
   </div>
+  <div class="settings"><label for="prefix">Box labels start with</label><input id="prefix" type="text" autocomplete="off" spellcheck="false" value="CH-"><span>Scanning a code that starts with this switches the current box instead of counting an item.</span></div>
   <p class="note">Your count is saved on this device only, in this browser. Scans save as you go, so you can close the page and pick up later. Don't use Private Browsing or clear website data until you've sent your report. Copy report pastes cleanly into a text or email; the CSV opens in Excel or Google Sheets.</p>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -212,6 +225,11 @@ td.boxes{font-size:.8rem;color:var(--muted)}
   const skuEl=$('sku'), qtyEl=$('qty'), boxEl=$('box'), whoEl=$('who');
   let scans=[];            // {id, sku, qty, box, t}
   const LS='boxcount.scans.v1';
+  const prefixEl=$('prefix');
+  try{const p=localStorage.getItem('boxcount.prefix');if(p!==null)prefixEl.value=p}catch(e){}
+  prefixEl.addEventListener('input',()=>{try{localStorage.setItem('boxcount.prefix',prefixEl.value)}catch(e){}});
+  const isBoxCode=c=>{const p=String(prefixEl.value||'').trim().toUpperCase().replace(/\s+/g,'');return !!p&&c.startsWith(p)&&c.length>p.length};
+  let view='sku';
 
   function lsLoad(){try{const v=JSON.parse(localStorage.getItem(LS)||'[]');return Array.isArray(v)?v:[]}catch(e){return[]}}
   function lsSave(){try{localStorage.setItem(LS,JSON.stringify(scans))}catch(e){}}
@@ -234,6 +252,15 @@ td.boxes{font-size:.8rem;color:var(--muted)}
     return [...m.values()].sort((a,b)=>a.sku.localeCompare(b.sku,undefined,{numeric:true}));
   }
 
+  function byBox(){
+    const m=new Map();
+    for(const s of scans){
+      const k=s.box||'No box';const g=m.get(k)||{box:k,units:0,skus:new Map()};
+      g.units+=s.qty;g.skus.set(s.sku,(g.skus.get(s.sku)||0)+s.qty);m.set(k,g);
+    }
+    return [...m.values()].sort((a,b)=>a.box==='No box'?1:b.box==='No box'?-1:a.box.localeCompare(b.box,undefined,{numeric:true}))
+      .map(g=>({box:g.box,units:g.units,items:[...g.skus].map(([sku,qty])=>({sku,qty})).sort((a,b)=>a.sku.localeCompare(b.sku,undefined,{numeric:true}))}));
+  }
   function render(){
     const sorted=[...scans].sort((a,b)=>a.t-b.t);
     const log=$('log');
@@ -249,11 +276,23 @@ td.boxes{font-size:.8rem;color:var(--muted)}
     $('stUnits').textContent=units;$('stSkus').textContent=t.length;$('stBoxes').textContent=allBoxes.size;
     const last=sorted[sorted.length-1];
     $('lastLine').innerHTML=last?`Last: <b>${esc(last.sku)}</b>${last.qty>1?' ×'+last.qty:''} — now ${totals().find(e=>e.sku===last.sku).qty} total`:'Qty resets to 1 after each entry.';
+    const cur=boxEl.value.trim().toUpperCase();
+    $('lastLine').innerHTML=(cur?`Box <b>${esc(cur)}</b>: ${scans.filter(s=>s.box===cur).reduce((a,s)=>a+s.qty,0)} units so far. `:'No box set. ')+$('lastLine').innerHTML;
+    const g=byBox();
+    $('byBox').innerHTML=g.map(b=>`<div class="boxgroup"><h3><span>${esc(b.box)}</span><span class="meta">${b.units} units · ${b.items.length} SKUs</span></h3><table><tbody>${b.items.map(e=>`<tr><td><span class="s">${esc(e.sku)}</span></td><td class="r qtycell">${e.qty}</td></tr>`).join('')}</tbody></table></div>`).join('');
+    $('byBox').hidden=view!=='box'||!g.length;$('bySku').hidden=view!=='sku';
+    $('totTitle').textContent=view==='box'?'Totals by box':'Totals by SKU';
     $('genTime').textContent=scans.length?'Updated '+new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
   }
 
   function addScan(fromCam){
     const sku=norm(skuEl.value); if(!sku){if(!fromCam)skuEl.focus();return}
+    if(isBoxCode(sku)){
+      boxEl.value=sku;try{localStorage.setItem('boxcount.box',sku)}catch(e){}
+      skuEl.value='';if(!fromCam)skuEl.focus();
+      render();toast('Now counting box '+sku);
+      return 'box';
+    }
     let q=parseInt(qtyEl.value,10); if(!(q>0))q=1;
     const box=boxEl.value.trim().toUpperCase();
     const rec={sku,qty:q,box,t:Date.now()};
@@ -282,6 +321,9 @@ td.boxes{font-size:.8rem;color:var(--muted)}
   $('log').addEventListener('click',e=>{const b=e.target.closest('.x');if(b)removeScan(b.dataset.id)});
 
   function setTab(t){$('grid').dataset.tab=t;$('tabLog').setAttribute('aria-selected',t==='log');$('tabTotals').setAttribute('aria-selected',t==='totals')}
+  function setView(v){view=v;$('vSku').setAttribute('aria-pressed',v==='sku');$('vBox').setAttribute('aria-pressed',v==='box');render()}
+  $('vSku').onclick=()=>setView('sku');$('vBox').onclick=()=>setView('box');
+  boxEl.addEventListener('change',render);
   $('tabLog').onclick=()=>setTab('log');$('tabTotals').onclick=()=>setTab('totals');
 
   function stamp(){const d=new Date();return d.toISOString().slice(0,10)}
@@ -291,12 +333,13 @@ td.boxes{font-size:.8rem;color:var(--muted)}
     const t=totals();
     let out=`Counted by,${q(who()||'')}\nDate,${new Date().toLocaleDateString()}\n\nSKU,Count,Boxes\n`+t.map(e=>[q(e.sku),e.qty,q([...e.boxes].sort().join(' '))].join(',')).join('\n');
     out+=`\n\nTotal units,${t.reduce((a,e)=>a+e.qty,0)}\nUnique SKUs,${t.length}\n`;
+    out+='\n\nBy box\nBox,SKU,Count\n'+byBox().map(g=>g.items.map(e=>[q(g.box),q(e.sku),e.qty].join(',')).join('\n')+`\n${q(g.box)} total,,${g.units}`).join('\n')+'\n';
     out+='\n\nScan log\n#,SKU,Qty,Box,Time\n'+[...scans].sort((a,b)=>a.t-b.t).map((s,i)=>[i+1,q(s.sku),s.qty,q(s.box||''),new Date(s.t).toLocaleString()].join(',')).join('\n')+'\n';
     return out;
   }
   function reportText(){
     const t=totals();const w=Math.max(3,...t.map(e=>e.sku.length));
-    return `Box verification count — ${new Date().toLocaleDateString()}${who()?'\nCounted by: '+who():''}\n\n`+'SKU'.padEnd(w)+'  QTY\n'+t.map(e=>e.sku.padEnd(w)+'  '+String(e.qty).padStart(3)).join('\n')+`\n\nTotal units: ${t.reduce((a,e)=>a+e.qty,0)}\nUnique SKUs: ${t.length}`;
+    return `Box verification count — ${new Date().toLocaleDateString()}${who()?'\nCounted by: '+who():''}\n\n`+'SKU'.padEnd(w)+'  QTY\n'+t.map(e=>e.sku.padEnd(w)+'  '+String(e.qty).padStart(3)).join('\n')+`\n\nTotal units: ${t.reduce((a,e)=>a+e.qty,0)}\nUnique SKUs: ${t.length}`+'\n\nBY BOX\n'+byBox().map(g=>`${g.box} (${g.units} units)\n`+g.items.map(e=>'  '+e.sku.padEnd(w)+'  '+String(e.qty).padStart(3)).join('\n')).join('\n\n');
   }
   $('csvBtn').onclick=async()=>{
     if(!scans.length){toast('Nothing to export yet');return}
@@ -338,8 +381,9 @@ td.boxes{font-size:.8rem;color:var(--muted)}
     if(now-anyAt<700)return;                         // short pause between any two reads
     if(code===lastCode&&now-lastAt<1800)return;      // same label still in view: count it once
     lastCode=code;lastAt=now;anyAt=now;
-    skuEl.value=code;addScan(true);beep();
-    $('camHint').innerHTML='Counted <span class="camhit">'+esc(code)+'</span>. Next item.';
+    skuEl.value=code;const res=addScan(true);beep();
+    if(res==='box'){setTimeout(beep,140);$('camHint').innerHTML='Now counting box <span class="camhit">'+esc(code)+'</span>. Scan its items.'}
+    else $('camHint').innerHTML='Counted <span class="camhit">'+esc(code)+'</span>. Next item.';
   }
   async function startCam(){
     try{audio=audio||new (window.AudioContext||window.webkitAudioContext)();if(audio.resume)audio.resume()}catch(e){}
