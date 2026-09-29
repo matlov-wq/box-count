@@ -127,6 +127,8 @@ td.boxes{font-size:.8rem;color:var(--muted)}
 .boxgroup table td{padding-block:5px}
 .settings{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;color:var(--muted)}
 #prefix{width:6.5rem;font-family:var(--f-mono);font-size:1rem;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);text-transform:uppercase}
+.camctl{display:flex;gap:8px;flex-wrap:wrap}
+#torchBtn[aria-pressed="true"]{background:var(--kraft-soft);border-color:var(--kraft);color:var(--ink)}
 </style>
 </head>
 <body>
@@ -155,7 +157,7 @@ td.boxes{font-size:.8rem;color:var(--muted)}
       <div id="reader"></div>
       <div class="camrow">
         <span class="camhint" id="camHint">Point at a barcode. A beep means it was counted. Move to the next item before scanning again.</span>
-        <button type="button" class="btn" id="camStop">Stop camera</button>
+        <span class="camctl"><button type="button" class="btn" id="torchBtn" aria-pressed="false">Flashlight: Off</button><button type="button" class="btn" id="camStop">Stop camera</button></span>
       </div>
     </div>
 
@@ -401,7 +403,17 @@ td.boxes{font-size:.8rem;color:var(--muted)}
       toast(/Permission|NotAllowed/i.test(String(e&&(e.name||e)))?'Camera blocked. Allow it in Safari settings for this site.':"Couldn't start the camera");
     }
   }
+  let torchOn=false;
+  function torchCap(){try{const t=qr&&qr.isScanning&&qr.getRunningTrackCameraCapabilities().torchFeature();return t&&t.isSupported()?t:null}catch(e){return null}}
+  function showTorch(){const b=$('torchBtn');b.setAttribute('aria-pressed',torchOn);b.textContent='Flashlight: '+(torchOn?'On':'Off')}
+  $('torchBtn').onclick=async()=>{
+    const t=torchCap();
+    if(!t){toast("This browser won't let the page use the flashlight");return}
+    try{await t.apply(!torchOn);torchOn=!torchOn;showTorch()}catch(e){toast("Couldn't switch the flashlight")}
+  };
   async function stopCam(){
+    try{const t=torchCap();if(t&&torchOn)await t.apply(false)}catch(e){}
+    torchOn=false;showTorch();
     try{if(qr&&qr.isScanning)await qr.stop()}catch(e){}
     $('cam').hidden=true;$('camBtn').hidden=false;
   }
